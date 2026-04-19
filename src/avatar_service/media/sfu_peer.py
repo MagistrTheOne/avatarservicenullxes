@@ -235,11 +235,21 @@ class StreamSfuPeer:
             if not sfu_url:
                 raise RuntimeError("stream coordinator did not return an SFU URL")
 
-            # 2) SDP exchange with the SFU edge.
+            # 2) SDP exchange with the SFU edge over Twirp HTTP.
+            #
+            # Stream coordinator returns `sfu_url` like
+            # `https://sfu-oci-london-vp1-XXX.stream-io-video.com/twirp`
+            # (already includes the `/twirp` prefix). The Twirp endpoint pattern
+            # is `<base>/twirp/<package>.<service>/<method>`, so we must strip
+            # any trailing `/twirp` from the coordinator URL before appending
+            # ours, otherwise the path becomes `/twirp/twirp/...` and the
+            # SFU returns 404.
+            sfu_base = sfu_url.rstrip("/")
+            if sfu_base.endswith("/twirp"):
+                sfu_base = sfu_base[: -len("/twirp")]
             sdp_url = (
-                sfu_url.rstrip("/")
-                + f"/rpc/twirp/stream.video.sfu.signal.v2.SignalServer/SetPublisher"
-                + f"?api_key={self._stream_api_key}"
+                f"{sfu_base}/twirp/stream.video.sfu.signal.v2.SignalServer/SetPublisher"
+                f"?api_key={self._stream_api_key}"
             )
             sdp_body = {
                 "session_id": f"{self._config.agent_user_id}:{self._config.call_id}",
