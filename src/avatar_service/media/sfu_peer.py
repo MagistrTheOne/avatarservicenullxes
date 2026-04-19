@@ -121,11 +121,13 @@ class StreamSfuPeer:
         video_track: MediaStreamTrack,
         *,
         stream_api_key: str = "",
+        stream_default_location: str = "amsterdam",
         on_subscribed: Callable[[], None] | None = None,
     ) -> None:
         self._config = config
         self._base_url = stream_base_url.rstrip("/")
         self._stream_api_key = stream_api_key
+        self._stream_default_location = stream_default_location
         self._tts_ring = tts_audio_ring
         self._mic_ring = mic_audio_ring
         self._video_track = video_track
@@ -198,11 +200,16 @@ class StreamSfuPeer:
                 f"{self._base_url}/video/call/{self._config.call_type}/"
                 f"{self._config.call_id}/join?api_key={self._stream_api_key}"
             )
+            # `location` tells Stream which SFU edge to use. Required field —
+            # without it the coordinator returns 400 "location is a required
+            # field" even with valid auth. The frontend SDK fills this from
+            # `LocationHintBatcher`, but on server side we pin it via env.
             join_body = {
+                "location": self._stream_default_location,
                 "data": {
                     "user_id": self._config.agent_user_id,
                     "member_ids": [self._config.agent_user_id],
-                }
+                },
             }
             join_headers = {
                 "Authorization": f"Bearer {self._config.agent_user_token}",

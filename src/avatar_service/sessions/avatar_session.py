@@ -201,6 +201,7 @@ class AvatarSession:
                 config=self._request.sfu,
                 stream_base_url=self._settings.stream_base_url,
                 stream_api_key=self._settings.stream_api_key,
+                stream_default_location=self._settings.stream_default_location,
                 tts_audio_ring=self._tts_ring,
                 mic_audio_ring=self._mic_ring,
                 video_track=self._video_track,

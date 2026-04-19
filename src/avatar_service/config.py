@@ -51,6 +51,12 @@ class Settings(BaseSettings):
     stream_api_key: str = ""
     stream_api_secret: str = ""
     stream_base_url: str = "https://video.stream-io-api.com"
+    # Stream coordinator requires a `location` hint on JoinCall to pick the
+    # nearest SFU edge. Frontend SDK derives it from geolocation; the pod is
+    # server-side so we use a fixed default. Override per pod region.
+    # Common values: amsterdam, frankfurt, london, dublin, oregon, virginia,
+    # chicago, mumbai, singapore, tokyo, sydney.
+    stream_default_location: str = "amsterdam"
 
     # --- Gateway callback -----------------------------------------------------
     gateway_base_url: str = ""
