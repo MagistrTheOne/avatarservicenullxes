@@ -51,7 +51,7 @@ def configure_logging(settings: Settings) -> None:
     Call once at process startup. Safe to call multiple times (idempotent).
     """
 
-    level = logging.getLevelNamesMapping().get(settings.log_level.upper(), logging.INFO)
+    level = _level_from_name(settings.log_level)
 
     logging.basicConfig(
         format="%(message)s",
@@ -86,6 +86,27 @@ def _json_dumps(obj: Any, **kwargs: Any) -> str:
     import orjson
 
     return orjson.dumps(obj).decode("utf-8")
+
+
+# `logging.getLevelNamesMapping()` only exists in Python 3.11+. We deploy on
+# 3.10 in some environments (e.g. Ubuntu 22.04 default), so we keep our own
+# lookup table that mirrors the stdlib mapping.
+_LEVELS: dict[str, int] = {
+    "CRITICAL": logging.CRITICAL,
+    "FATAL": logging.FATAL,
+    "ERROR": logging.ERROR,
+    "WARN": logging.WARNING,
+    "WARNING": logging.WARNING,
+    "INFO": logging.INFO,
+    "DEBUG": logging.DEBUG,
+    "NOTSET": logging.NOTSET,
+}
+
+
+def _level_from_name(name: str | None) -> int:
+    if not name:
+        return logging.INFO
+    return _LEVELS.get(name.strip().upper(), logging.INFO)
 
 
 def get_logger(name: str | None = None) -> structlog.stdlib.BoundLogger:
