@@ -1,0 +1,11 @@
+# GPU-only deps, installed on the RunPod pod in addition to requirements.txt.
+# Versions match the ARACHNE-X-NULLXES- upstream repo.
+--extra-index-url https://download.pytorch.org/whl/cu124
+torch==2.6.0+cu124
+torchvision==0.21.0+cu124
+torchaudio==2.6.0
+transformers>=4.45.0
+safetensors>=0.4.5
+einops>=0.8.0
+huggingface_hub>=0.26.0
+# flash_attn is installed separately with --no-build-isolation, see Dockerfile.
