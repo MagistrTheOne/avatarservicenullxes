@@ -49,15 +49,64 @@ class SfuJoinConfig(BaseModel):
     )
 
 
+class ArachneInitConfig(BaseModel):
+    """ARACHNE-specific knobs that the gateway can override per session.
+
+    The defaults match the recommended values from the upstream
+    `pipe.generate_streaming_ai2v` signature and the AVATAR model card.
+    """
+
+    prompt: str = Field(
+        default="A person speaking naturally, neutral background, professional setting.",
+        description=(
+            "Short text condition fed to the DiT (style / context). NOT the "
+            "OpenAI LLM system prompt — keep it under ~200 chars and follow "
+            "the model-card hint of including a 'speaking' / 'talking' word."
+        ),
+    )
+    resolution: Literal["480p", "720p"] = "480p"
+    num_frames: int = Field(default=93, ge=13, le=240)
+    num_inference_steps: int = Field(default=8, ge=2, le=32)
+    text_guidance_scale: float = Field(default=4.0, ge=0.0, le=10.0)
+    audio_guidance_scale: float = Field(default=4.0, ge=0.0, le=10.0)
+
+
+class ReferenceImage(BaseModel):
+    """How to obtain the reference portrait for AI2V mode.
+
+    Exactly one of `url` / `base64` must be set. The gateway is the safer
+    place to pre-validate (size, MIME, content moderation) before the bytes
+    cross the network.
+    """
+
+    url: str | None = Field(default=None, description="HTTPS URL to a JPEG/PNG portrait.")
+    base64: str | None = Field(
+        default=None, description="Raw base64-encoded JPEG/PNG bytes (data URI prefix is stripped)."
+    )
+    sha256: str | None = Field(
+        default=None,
+        description="Optional content hash; if present, the avatar pod will validate it after fetch.",
+    )
+
+
 class CreateSessionRequest(BaseModel):
     """POST /sessions — request body."""
 
     meeting_id: str = Field(..., description="Monorepo/gateway meeting identifier.")
     session_id: str = Field(..., description="Stable session id, used for logging and agent_<sessionId>.")
-    avatar_key: str = Field(..., description="Identity key passed to ARACHNE (selects the reference portrait).")
+    avatar_key: str = Field(..., description="Identity key passed to ARACHNE; primary IdentityBank cache key.")
     transport: Transport = "webrtc-sfu"
     openai: OpenAIInitConfig
     sfu: SfuJoinConfig
+    arachne: ArachneInitConfig = Field(default_factory=ArachneInitConfig)
+    reference_image: ReferenceImage | None = Field(
+        default=None,
+        description=(
+            "Reference portrait for AI2V. If omitted, the pod uses a neutral "
+            "placeholder. Without a real portrait the avatar will not look "
+            "like a specific person — never ship to production sessions."
+        ),
+    )
     emotion: str | None = Field(default=None, description="Initial emotion tag (e.g. 'neutral', 'warm').")
 
 

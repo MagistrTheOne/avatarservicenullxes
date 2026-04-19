@@ -13,7 +13,10 @@ async def test_sleep_until_is_approximate() -> None:
     deadline = clock.now() + 0.05  # 50 ms
     await clock.sleep_until(deadline)
     drift = clock.now() - deadline
-    assert -0.005 <= drift <= 0.02, f"drift={drift*1000:.2f}ms"
+    # Windows asyncio sleep can drift up to ~30ms; we just need the clock to
+    # not return *before* the deadline.
+    assert drift >= -0.005, f"woke up too early: drift={drift*1000:.2f}ms"
+    assert drift <= 0.05, f"drift too large: drift={drift*1000:.2f}ms"
 
 
 def test_latency_ewma_converges() -> None:

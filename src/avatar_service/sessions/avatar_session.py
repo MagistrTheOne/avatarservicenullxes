@@ -38,6 +38,7 @@ from ..config import Settings
 from ..encode.video_track import AvatarVideoTrack
 from ..inference.frame_pipeline import FramePipeline
 from ..inference.identity_bank import IdentityBank, IdentityTokens
+from ..inference.image_loader import ReferenceImageError, load_reference_image
 from ..inference.runtime_base import AvatarRuntime
 from ..logging import get_logger
 from ..media.audio_ring import AudioRing
@@ -138,21 +139,41 @@ class AvatarSession:
             await self._openai_peer.connect(self._request.openai)
             await self._openai_peer.apply_session_update(self._request.openai)
 
-            # 2) Identity (uses a neutral placeholder portrait if no image was attached;
-            #    in production the gateway ships the reference image bytes via an
-            #    extension field — see API_CONTRACT.md).
+            # 2) Identity. AI2V mode: we need a reference portrait for ARACHNE.
+            #    First check the identity bank — same avatar_key across sessions
+            #    means we never re-encode the same face. On a miss we fetch the
+            #    portrait (URL or base64), validate, and call prepare_identity.
+            #    Only in dev / when the gateway omits the reference do we fall
+            #    back to a neutral grey placeholder (the result will look like
+            #    a generic averaged face — never ship that to a real interview).
             self._phase = "model_loading"
-            placeholder = _neutral_portrait()
             cached = self._identity_bank.get(self._request.avatar_key)
             if cached is None:
+                if self._request.reference_image is not None:
+                    try:
+                        portrait = await load_reference_image(self._request.reference_image)
+                    except ReferenceImageError as exc:
+                        raise RuntimeError(f"reference_image load failed: {exc}") from exc
+                else:
+                    _log.warning(
+                        "avatar_session.no_reference_image",
+                        session_id=self._request.session_id,
+                        avatar_key=self._request.avatar_key,
+                    )
+                    portrait = _neutral_portrait()
                 cached = await self._runtime.prepare_identity(
-                    self._request.avatar_key, placeholder
+                    self._request.avatar_key, portrait
                 )
                 self._identity_bank.put(cached)
             self._identity = cached
 
-            # 3) Video track + frame pipeline + SFU peer.
-            width, height = _resolution_wh(self._settings.arachne_resolution)
+            # 3) Video track + frame pipeline + SFU peer. ARACHNE knobs come
+            #    from the per-request `arachne` block; settings provide the
+            #    pod-wide defaults (`arachne_resolution`, `arachne_block_num_frames`,
+            #    etc.) that the gateway can override per session.
+            arachne_cfg = self._request.arachne
+            resolution = arachne_cfg.resolution
+            width, height = _resolution_wh(resolution)
             self._video_track = AvatarVideoTrack(
                 width=width, height=height, fps=self._runtime.output_fps
             )
@@ -161,12 +182,12 @@ class AvatarSession:
                 tts_audio_ring=self._tts_ring,
                 video_track=self._video_track,
                 identity_tokens=self._identity,
-                prompt=self._request.openai.instructions or "A person speaking naturally.",
-                resolution=self._settings.arachne_resolution,
-                num_frames_per_block=self._settings.arachne_block_num_frames,
-                num_inference_steps=self._settings.arachne_num_inference_steps,
-                text_guidance_scale=self._settings.arachne_text_guidance_scale,
-                audio_guidance_scale=self._settings.arachne_audio_guidance_scale,
+                prompt=arachne_cfg.prompt,
+                resolution=resolution,
+                num_frames_per_block=arachne_cfg.num_frames,
+                num_inference_steps=arachne_cfg.num_inference_steps,
+                text_guidance_scale=arachne_cfg.text_guidance_scale,
+                audio_guidance_scale=arachne_cfg.audio_guidance_scale,
                 emotion=self._request.emotion,
             )
 

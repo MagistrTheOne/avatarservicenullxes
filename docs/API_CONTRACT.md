@@ -34,9 +34,28 @@ its own `POST /avatar/events` endpoint.
     "agent_user_token": "<JWT minted by the gateway>",
     "candidate_user_id": "candidate_24"
   },
+  "arachne": {
+    "prompt": "A senior HR specialist speaking calmly, neutral office background.",
+    "resolution": "480p",
+    "num_frames": 93,
+    "num_inference_steps": 8,
+    "text_guidance_scale": 4.0,
+    "audio_guidance_scale": 4.0
+  },
+  "reference_image": {
+    "url": "https://cdn.nullxes.com/avatars/ksera/portrait_512.jpg",
+    "sha256": "9f2a...c41e"
+  },
   "emotion": "warm"
 }
 ```
+
+#### Field notes
+
+- **`openai.instructions`** is the **LLM system prompt** (long, multi-KB, drives what the agent says).
+- **`arachne.prompt`** is a **short text condition for the DiT** (visual style / context). Keep under ~200 chars; the AVATAR model card recommends including a `speaking` / `talking` token.
+- **`reference_image`** is the AI2V reference portrait (face crop, ~512 px on the long side, JPEG/PNG, ≤8 MB). Provide either `url` (HTTPS) or `base64` (raw bytes; `data:` URI prefix is auto-stripped); never both. Optional `sha256` is verified after fetch. The pod caches the encoded identity tokens by `avatar_key` in an LRU; subsequent sessions with the same key skip the re-encode.
+- **`arachne.resolution`** = `480p` (832×480) or `720p` (1280×720). 480p is recommended for the 16 FPS interview track.
 
 ### Response (`202 Accepted`)
 
@@ -53,6 +72,7 @@ its own `POST /avatar/events` endpoint.
 
 - `409 pod_busy` — another session is already active on this pod.
 - `503 runtime_not_loaded` — the model is still loading; retry shortly.
+- `422 reference_image_invalid` — fetch / decode / SHA-256 mismatch.
 - `4xx` — Pydantic validation failure on the request body.
 
 ## `GET /sessions/{sid}` — inspect

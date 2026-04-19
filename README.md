@@ -5,8 +5,24 @@ Real-time AI avatar service for the NULLXES HR AI interview platform.
 One Python process on a single NVIDIA **H200** GPU:
 
 - holds a WebRTC peer to **OpenAI Realtime** (TTS audio + DataChannel events);
-- runs **ARACHNE-X-ULTRA-AVATAR** (13.6B DiT, `audio + image -> video`) **in-process** — no gRPC, no Triton, no extra hop;
+- runs **[ARACHNE-X-ULTRA-AVATAR](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-AVATAR)** (13.6B DiT, `audio + image -> video`) **in-process** — no gRPC, no Triton, no extra hop;
 - joins the **Stream SFU** call as a server-side participant `agent_<sessionId>` and publishes both the TTS audio track and the generated avatar video track.
+
+### Which model do we load — AVATAR or VIDEO?
+
+Only [`ARACHNE-X-ULTRA-AVATAR`](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-AVATAR). It is the talking-head fork of the same 13.6B DiT (which is itself a fork of [LongCat-Video](https://huggingface.co/meituan-longcat/LongCat-Video)) and is the only one with audio conditioning + identity preservation needed for real-time interview avatars.
+
+[`ARACHNE-X-ULTRA-VIDEO`](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-VIDEO) is the foundation T2V/I2V model (no audio conditioning, no Wav2Vec2). It is meant for offline cinematic clips. Loading both side-by-side does not fit on one H200 (both are ~120 GB resident at FP16) and is not needed for the interview product. If we ever need short generative b-roll or intro stings, that is a separate on-demand pod, not this service.
+
+### Mode: AI2V (Audio + Image → Video)
+
+The service drives ARACHNE in `generate_streaming_ai2v(image=..., prompt=..., audio_stream=..., ...)` mode:
+
+- **Identity** comes from a reference portrait (`reference_image.url` or `reference_image.base64` on `POST /sessions`). It is encoded once per `avatar_key` and cached in an LRU `IdentityBank`.
+- **Voice** is a continuous PCM16 mono 16 kHz stream pulled from the `tts_ring` (which is fed by the OpenAI Realtime peer after a 24→16 kHz resample).
+- **Text condition** for the DiT is `arachne.prompt` — a short visual style hint (~200 chars), distinct from the long `openai.instructions` LLM system prompt.
+
+`AT2V` (text-only condition) is intentionally *not* used: it generates a different face every time, which is unacceptable for a brand HR avatar.
 
 The browser of the candidate talks **only** to the Stream SFU. It never opens a
 WebRTC peer to OpenAI, it never relays audio through the gateway. The gateway is
