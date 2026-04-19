@@ -228,15 +228,22 @@ class AvatarSession:
                 )
             await self._sfu_peer.connect()
 
-            # 4) Start the frame pipeline and wait for the first frame before we
-            #    tell the gateway we're ready (so the HR sees video the moment the
-            #    SSE event lands).
+            # 4) Kick OpenAI to start speaking BEFORE the pipeline waits on
+            #    audio. Otherwise the frame loop sits idle for ~17 s
+            #    (max(3, 3 * num_frames / fps)) before injecting silence,
+            #    pushing the first-frame deadline past our 20 s budget.
+            #    request_response() requires the oai-events DataChannel to be
+            #    open, which apply_session_update() already awaits above.
+            await self._openai_peer.request_response()
+
+            # 5) Start the frame pipeline and wait for the first frame before
+            #    we tell the gateway we're ready (so the HR sees video the
+            #    moment the SSE event lands). Timeout 35 s covers the worst
+            #    case where OpenAI is slow to answer and we fall back to the
+            #    silence-injected idle render.
             self._phase = "warming_up"
             self._pipeline.start()
-            await self._wait_first_frame(timeout=20.0)
-
-            # 5) Kick the agent off: `response.create` so OpenAI starts speaking.
-            await self._openai_peer.request_response()
+            await self._wait_first_frame(timeout=35.0)
 
             self._phase = "ready"
             self._ready_at = time.time()
