@@ -200,6 +200,7 @@ class AvatarSession:
             self._sfu_peer = StreamSfuPeer(
                 config=self._request.sfu,
                 stream_base_url=self._settings.stream_base_url,
+                stream_api_key=self._settings.stream_api_key,
                 tts_audio_ring=self._tts_ring,
                 mic_audio_ring=self._mic_ring,
                 video_track=self._video_track,

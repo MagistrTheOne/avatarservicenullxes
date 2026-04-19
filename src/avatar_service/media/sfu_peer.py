@@ -55,8 +55,12 @@ _log = get_logger(__name__)
 
 
 class _AgentAudioTrack(MediaStreamTrack):
-    """Audio track sourced from an AudioRing. Emits 20 ms 48 kHz stereo frames so
-    Opus encoding is at its most efficient preset.
+    """Audio track sourced from an AudioRing. Emits 20 ms 48 kHz mono frames.
+
+    PyAV's ``AudioFrame.from_ndarray`` packed-format contract is
+    ``shape=(1, channels*nb_samples)`` for ``s16`` and ``shape=(channels, nb_samples)``
+    only for the planar variant ``s16p``. We use mono ``s16`` because Opus
+    encodes mono efficiently and the source ring is mono anyway.
     """
 
     kind = "audio"
@@ -88,8 +92,8 @@ class _AgentAudioTrack(MediaStreamTrack):
             elif pcm.size > self._samples_per_chunk:
                 pcm = pcm[: self._samples_per_chunk]
 
-        stereo = np.stack([pcm, pcm], axis=0).astype(np.int16)
-        frame = av.AudioFrame.from_ndarray(stereo, format="s16", layout="stereo")
+        mono = pcm.astype(np.int16, copy=False).reshape(1, -1)
+        frame = av.AudioFrame.from_ndarray(mono, format="s16", layout="mono")
         frame.sample_rate = self._out_rate
         frame.pts = self._pts
         frame.time_base = self._time_base
@@ -116,10 +120,12 @@ class StreamSfuPeer:
         mic_audio_ring: AudioRing,
         video_track: MediaStreamTrack,
         *,
+        stream_api_key: str = "",
         on_subscribed: Callable[[], None] | None = None,
     ) -> None:
         self._config = config
         self._base_url = stream_base_url.rstrip("/")
+        self._stream_api_key = stream_api_key
         self._tts_ring = tts_audio_ring
         self._mic_ring = mic_audio_ring
         self._video_track = video_track
@@ -176,9 +182,22 @@ class StreamSfuPeer:
         doesn't need to know them.
         """
 
+        if not self._stream_api_key:
+            raise RuntimeError(
+                "stream_api_key is empty — set STREAM_API_KEY in the avatar pod env "
+                "(coordinator rejects requests without ?api_key=...)"
+            )
         async with httpx.AsyncClient(timeout=30.0) as client:
             # 1) Coordinator join — yields an SFU URL and a credential used to talk to it.
-            join_url = f"{self._base_url}/video/call/{self._config.call_type}/{self._config.call_id}/join"
+            #    Stream's REST coordinator demands `api_key` as a query string
+            #    parameter even when the request carries a valid user JWT in
+            #    Authorization; the JWT identifies the *user* but not the
+            #    *application*. Without it the server returns 401
+            #    "api_key or app_id not provided".
+            join_url = (
+                f"{self._base_url}/video/call/{self._config.call_type}/"
+                f"{self._config.call_id}/join?api_key={self._stream_api_key}"
+            )
             join_body = {
                 "data": {
                     "user_id": self._config.agent_user_id,
@@ -210,7 +229,11 @@ class StreamSfuPeer:
                 raise RuntimeError("stream coordinator did not return an SFU URL")
 
             # 2) SDP exchange with the SFU edge.
-            sdp_url = sfu_url.rstrip("/") + "/rpc/twirp/stream.video.sfu.signal.v2.SignalServer/SetPublisher"
+            sdp_url = (
+                sfu_url.rstrip("/")
+                + f"/rpc/twirp/stream.video.sfu.signal.v2.SignalServer/SetPublisher"
+                + f"?api_key={self._stream_api_key}"
+            )
             sdp_body = {
                 "session_id": f"{self._config.agent_user_id}:{self._config.call_id}",
                 "sdp": offer_sdp,

@@ -82,7 +82,15 @@ def _build_session_payload(model: str, init: OpenAIInitConfig) -> dict[str, Any]
 
 
 class _MicForwardTrack(MediaStreamTrack):
-    """Audio track sourced from an `AudioRing`. Emits 20 ms 48 kHz stereo frames."""
+    """Audio track sourced from an `AudioRing`. Emits 20 ms mono frames at the
+    ring's native rate (16 kHz). aiortc/Opus will resample to 48 kHz internally
+    if needed.
+
+    PyAV's ``AudioFrame.from_ndarray`` for packed ``s16`` requires
+    ``shape=(1, channels*nb_samples)``. The previous ``(2, samples)`` layout
+    matched the planar ``s16p`` format and crashed every encode pass with
+    ``ValueError: Expected packed array.shape[0] to equal 1 but got 2``.
+    """
 
     kind = "audio"
 
@@ -99,9 +107,8 @@ class _MicForwardTrack(MediaStreamTrack):
         pcm = await self._cursor.read_exactly(target, timeout=0.1)
         if pcm is None or pcm.size < target:
             pcm = np.zeros(target, dtype=np.int16)
-        # aiortc expects stereo s16 by default; duplicate mono -> stereo.
-        stereo = np.stack([pcm, pcm], axis=0)
-        frame = av.AudioFrame.from_ndarray(stereo, format="s16", layout="stereo")
+        mono = pcm.astype(np.int16, copy=False).reshape(1, -1)
+        frame = av.AudioFrame.from_ndarray(mono, format="s16", layout="mono")
         frame.sample_rate = self._ring.sample_rate
         frame.pts = self._pts
         frame.time_base = self._time_base
