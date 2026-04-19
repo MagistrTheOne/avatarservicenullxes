@@ -10,7 +10,7 @@ One Python process on a single NVIDIA **H200** GPU:
 
 ### Which model do we load — AVATAR or VIDEO?
 
-Only [`ARACHNE-X-ULTRA-AVATAR`](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-AVATAR). It is the talking-head fork of the same 13.6B DiT (which is itself a fork of [LongCat-Video](https://huggingface.co/meituan-longcat/LongCat-Video)) and is the only one with audio conditioning + identity preservation needed for real-time interview avatars.
+Only [`ARACHNE-X-ULTRA-AVATAR`](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-AVATAR). It is the talking-head fork of the same 13.6B DiT  and is the only one with audio conditioning + identity preservation needed for real-time interview avatars.
 
 [`ARACHNE-X-ULTRA-VIDEO`](https://huggingface.co/MagistrTheOne/ARACHNE-X-ULTRA-VIDEO) is the foundation T2V/I2V model (no audio conditioning, no Wav2Vec2). It is meant for offline cinematic clips. Loading both side-by-side does not fit on one H200 (both are ~120 GB resident at FP16) and is not needed for the interview product. If we ever need short generative b-roll or intro stings, that is a separate on-demand pod, not this service.
 
