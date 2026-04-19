@@ -104,8 +104,14 @@ class VisionAgentsPeer:
 
         # `Stream` is the high-level client. It can mint user JWTs from the
         # API secret which the SDK uses internally during join.
+        #
+        # rtc.join requires an *async* video client because the connection
+        # manager awaits client.post(...) results. Stream() returns a sync
+        # client whose .post returns a StreamResponse (not a coroutine), so
+        # we must call .as_async() to get the AsyncStream variant.
         self._stream = Stream(api_key=stream_api_key, api_secret=stream_api_secret)
-        self._call = self._stream.video.call(config.call_type, config.call_id)
+        self._async_stream = self._stream.as_async()
+        self._call = self._async_stream.video.call(config.call_type, config.call_id)
 
         # SDK-managed publisher track. We pump PcmData into it from the
         # tts_audio_ring; the SDK encodes Opus and sends it to the SFU.
@@ -185,6 +191,14 @@ class VisionAgentsPeer:
                 _log.info("sfu.close.error", error=str(exc))
             self._conn = None
 
+        try:
+            close = getattr(self._async_stream, "close", None)
+            if callable(close):
+                result = close()
+                if asyncio.iscoroutine(result):
+                    await result
+        except Exception:
+            pass
         try:
             self._stream.close()
         except Exception:
