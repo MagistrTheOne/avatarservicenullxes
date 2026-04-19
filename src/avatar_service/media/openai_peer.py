@@ -123,7 +123,15 @@ class OpenAIRealtimePeer:
     ) -> None:
         self._api_key = api_key
         self._model = model
-        self._base_url = base_url.rstrip("/")
+        # Accept either form for OPENAI_REALTIME_BASE_URL:
+        #   https://api.openai.com/v1            (will append /realtime/calls)
+        #   https://api.openai.com/v1/realtime   (will append /calls)
+        # We normalise to ".../v1/realtime" so the call to /calls is always
+        # constructed the same way below.
+        normalised = base_url.rstrip("/")
+        if not normalised.endswith("/realtime"):
+            normalised = normalised + "/realtime"
+        self._base_url = normalised
         self._tts_ring = tts_audio_ring
         self._mic_ring = mic_audio_ring
         self._on_event = on_event
@@ -196,7 +204,7 @@ class OpenAIRealtimePeer:
         self._event_pump_task = asyncio.create_task(self._event_pump(), name="oai-event-pump")
 
     async def _http_handshake(self, offer_sdp: str, init: OpenAIInitConfig) -> str:
-        url = f"{self._base_url}/realtime/calls"
+        url = f"{self._base_url}/calls"
         session_json = json.dumps(_build_session_payload(self._model, init))
         files = {
             "sdp": (None, _normalize_sdp(offer_sdp), "application/sdp"),
