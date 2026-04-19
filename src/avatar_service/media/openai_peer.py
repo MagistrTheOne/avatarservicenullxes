@@ -145,6 +145,11 @@ class OpenAIRealtimePeer:
 
         self._event_queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._event_pump_task: asyncio.Task[None] | None = None
+        # The `oai-events` DataChannel opens asynchronously after ICE finishes;
+        # callers (avatar_session.start) must await `wait_until_open` before
+        # the first `session.update`, otherwise sends race the open handshake
+        # and raise "datachannel is not open".
+        self._dc_open_event: asyncio.Event = asyncio.Event()
 
     # ------------------------------------------------------------ properties
     @property
@@ -172,6 +177,12 @@ class OpenAIRealtimePeer:
         @self._datachannel.on("open")
         def _on_dc_open() -> None:
             _log.info("openai.dc.open")
+            self._dc_open_event.set()
+
+        @self._datachannel.on("close")
+        def _on_dc_close() -> None:
+            _log.info("openai.dc.close")
+            self._dc_open_event.clear()
 
         @self._datachannel.on("message")
         def _on_dc_message(raw: Any) -> None:
@@ -251,6 +262,26 @@ class OpenAIRealtimePeer:
             self._pc = None
 
     # ------------------------------------------------------------ send
+    async def wait_until_open(self, timeout: float = 10.0) -> None:
+        """Block until the `oai-events` DataChannel transitions to ``open``.
+
+        OpenAI's WebRTC server only opens the DC after ICE is connected and the
+        SDP answer's data section has been finalised. Calling `send_event`
+        before that races the open handshake and crashes the session start.
+        """
+
+        if self._datachannel is None:
+            raise RuntimeError("oai-events datachannel was never created")
+        if self._datachannel.readyState == "open":
+            return
+        try:
+            await asyncio.wait_for(self._dc_open_event.wait(), timeout=timeout)
+        except asyncio.TimeoutError as exc:
+            state = self._datachannel.readyState if self._datachannel else "<no-dc>"
+            raise RuntimeError(
+                f"oai-events datachannel did not open within {timeout:.1f}s (state={state})"
+            ) from exc
+
     async def send_event(self, event: dict[str, Any]) -> None:
         """Send a client event (e.g. `session.update`, `response.create`) to OpenAI."""
 

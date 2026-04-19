@@ -137,6 +137,11 @@ class AvatarSession:
                 on_event=self._on_openai_event,
             )
             await self._openai_peer.connect(self._request.openai)
+            # OpenAI's `oai-events` DataChannel opens asynchronously after ICE
+            # finishes; without this wait `apply_session_update` races the open
+            # handshake and the session bails out with
+            # "RuntimeError: oai-events datachannel is not open".
+            await self._openai_peer.wait_until_open(timeout=15.0)
             await self._openai_peer.apply_session_update(self._request.openai)
 
             # 2) Identity. AI2V mode: we need a reference portrait for ARACHNE.
