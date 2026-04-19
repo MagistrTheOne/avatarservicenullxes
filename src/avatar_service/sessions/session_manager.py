@@ -79,13 +79,29 @@ class SessionManager:
             )
             self._active = session
 
-        # Start outside the lock so concurrent ``/health/ready`` calls don't block.
+        # Kick off the heavy start sequence (OpenAI handshake + SFU join +
+        # ARACHNE warmup of the first block) as a background task. The HTTP
+        # response is `202 Accepted` and the gateway is notified about the
+        # actual readiness through the `avatar_ready` webhook event. This
+        # keeps the gateway's create-session HTTP call short (it would
+        # otherwise time out after 15 s while the first block compiles).
+        asyncio.create_task(
+            self._run_start(session),
+            name=f"avatar-session-start:{request.session_id}",
+        )
+        return session
+
+    async def _run_start(self, session: AvatarSession) -> None:
         try:
             await session.start()
-        except Exception:
-            # start() already called .stop(), and phase == "failed".
-            pass
-        return session
+        except Exception as exc:
+            # start() already called .stop() internally and set phase=failed,
+            # plus emitted an `error` event to the gateway. Just log here.
+            _log.warning(
+                "session_manager.start.failed",
+                session_id=session.request.session_id,
+                error=str(exc),
+            )
 
     async def stop(self, session_id: str) -> AvatarSession:
         session = self.get(session_id)

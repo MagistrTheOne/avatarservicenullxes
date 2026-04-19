@@ -110,20 +110,50 @@ class FramePipeline:
         sr = self._runtime.audio_sample_rate
         block_samples = int(math.ceil(self._num_frames * sr / fps))
 
+        _log.info(
+            "frame_pipeline.started",
+            num_frames=self._num_frames,
+            fps=fps,
+            sample_rate=sr,
+            block_samples=block_samples,
+            steps=self._steps,
+        )
+
         while not self._cancelled:
             # Block on enough audio; if it doesn't arrive within 3x block duration,
             # we synthesize silence so the avatar falls into idle rendering.
             timeout = max(3.0, 3.0 * (self._num_frames / fps))
+            read_t0 = time.perf_counter()
             pcm = await self._cursor.read_exactly(block_samples, timeout=timeout)
+            read_ms = round((time.perf_counter() - read_t0) * 1000.0, 1)
             if pcm is None:
                 if self._cancelled:
                     return
                 self.audio_underruns += 1
-                _log.warning("frame_pipeline.audio_underrun", requested=block_samples)
+                _log.warning(
+                    "frame_pipeline.audio_underrun",
+                    requested=block_samples,
+                    waited_ms=read_ms,
+                    block=self.blocks_generated + 1,
+                )
                 # Inject silence block so the avatar doesn't freeze visually.
                 import numpy as np
 
                 pcm = np.zeros(block_samples, dtype=np.int16)
+            else:
+                _log.info(
+                    "frame_pipeline.audio_ready",
+                    samples=int(pcm.size),
+                    waited_ms=read_ms,
+                    block=self.blocks_generated + 1,
+                )
+
+            _log.info(
+                "frame_pipeline.infer.start",
+                block=self.blocks_generated + 1,
+                num_frames=self._num_frames,
+                steps=self._steps,
+            )
 
             request = BlockRequest(
                 audio_pcm16_16k=pcm,
@@ -149,6 +179,14 @@ class FramePipeline:
                 self.latency_ewma.observe(gf.inference_ms)
                 if self.first_frame_at is None:
                     self.first_frame_at = time.monotonic()
+                    _log.info(
+                        "frame_pipeline.first_frame",
+                        block=self.blocks_generated + 1,
+                        elapsed_since_block_start_ms=round(
+                            (time.perf_counter() - block_t0) * 1000.0, 1
+                        ),
+                        inference_ms=gf.inference_ms,
+                    )
             self.blocks_generated += 1
             _log.info(
                 "frame_pipeline.block_done",

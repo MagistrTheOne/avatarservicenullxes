@@ -238,12 +238,18 @@ class AvatarSession:
 
             # 5) Start the frame pipeline and wait for the first frame before
             #    we tell the gateway we're ready (so the HR sees video the
-            #    moment the SSE event lands). Timeout 35 s covers the worst
-            #    case where OpenAI is slow to answer and we fall back to the
-            #    silence-injected idle render.
+            #    moment the SSE event lands).
+            #
+            #    Timeout budget: warmup uses a tiny 7-frame block, but the
+            #    first production block has different tensor shapes
+            #    (`arachne_block_num_frames`), which forces torch.compile /
+            #    dynamo to recompile its CUDA graphs. We saw the recompile
+            #    counter hit cache_size_limit (256) on warmup. Allow up to
+            #    120 s for the first block to land; subsequent blocks reuse
+            #    the compiled graphs and take ~3 s each.
             self._phase = "warming_up"
             self._pipeline.start()
-            await self._wait_first_frame(timeout=35.0)
+            await self._wait_first_frame(timeout=120.0)
 
             self._phase = "ready"
             self._ready_at = time.time()
