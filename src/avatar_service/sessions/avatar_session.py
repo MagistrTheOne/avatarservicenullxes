@@ -44,6 +44,7 @@ from ..logging import get_logger
 from ..media.audio_ring import AudioRing
 from ..media.openai_peer import OpenAIRealtimePeer
 from ..media.sfu_peer import StreamSfuPeer
+from ..media.vision_agents_peer import VisionAgentsPeer
 
 _log = get_logger(__name__)
 
@@ -87,7 +88,7 @@ class AvatarSession:
 
         self._video_track: AvatarVideoTrack | None = None
         self._openai_peer: OpenAIRealtimePeer | None = None
-        self._sfu_peer: StreamSfuPeer | None = None
+        self._sfu_peer: StreamSfuPeer | VisionAgentsPeer | None = None
         self._pipeline: FramePipeline | None = None
         self._identity: IdentityTokens | None = None
 
@@ -197,16 +198,34 @@ class AvatarSession:
             )
 
             self._phase = "sfu_connecting"
-            self._sfu_peer = StreamSfuPeer(
-                config=self._request.sfu,
-                stream_base_url=self._settings.stream_base_url,
-                stream_api_key=self._settings.stream_api_key,
-                stream_default_location=self._settings.stream_default_location,
-                tts_audio_ring=self._tts_ring,
-                mic_audio_ring=self._mic_ring,
-                video_track=self._video_track,
-                on_subscribed=None,
-            )
+            # Choose SFU backend. The default `vision_agents` uses the official
+            # getstream Python SDK (handles WS+protobuf JoinFlow + Twirp).
+            # `legacy` keeps the hand-rolled REST/Twirp client around as an
+            # emergency fallback — it does NOT work against current Stream
+            # production because they require a WS join before any Twirp call.
+            if self._settings.sfu_backend == "legacy":
+                self._sfu_peer = StreamSfuPeer(
+                    config=self._request.sfu,
+                    stream_base_url=self._settings.stream_base_url,
+                    stream_api_key=self._settings.stream_api_key,
+                    stream_default_location=self._settings.stream_default_location,
+                    tts_audio_ring=self._tts_ring,
+                    mic_audio_ring=self._mic_ring,
+                    video_track=self._video_track,
+                    on_subscribed=None,
+                )
+            else:
+                self._sfu_peer = VisionAgentsPeer(
+                    config=self._request.sfu,
+                    stream_base_url=self._settings.stream_base_url,
+                    stream_api_key=self._settings.stream_api_key,
+                    stream_api_secret=self._settings.stream_api_secret,
+                    stream_default_location=self._settings.stream_default_location,
+                    tts_audio_ring=self._tts_ring,
+                    mic_audio_ring=self._mic_ring,
+                    video_track=self._video_track,
+                    on_subscribed=None,
+                )
             await self._sfu_peer.connect()
 
             # 4) Start the frame pipeline and wait for the first frame before we

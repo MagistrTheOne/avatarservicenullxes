@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     # Common values: amsterdam, frankfurt, london, dublin, oregon, virginia,
     # chicago, mumbai, singapore, tokyo, sydney.
     stream_default_location: str = "amsterdam"
+    # Which SFU backend to use:
+    # - "vision_agents" (default): official getstream Python SDK with full
+    #   coordinator + WS+protobuf SFU JoinFlow + Twirp SetPublisher.
+    # - "legacy": hand-rolled REST/Twirp client (kept for emergency fallback;
+    #   does NOT work against current Stream prod because they require WS join
+    #   before any Twirp request).
+    sfu_backend: Literal["vision_agents", "legacy"] = "vision_agents"
 
     # --- Gateway callback -----------------------------------------------------
     gateway_base_url: str = ""
