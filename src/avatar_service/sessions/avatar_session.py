@@ -240,16 +240,14 @@ class AvatarSession:
             #    we tell the gateway we're ready (so the HR sees video the
             #    moment the SSE event lands).
             #
-            #    Timeout budget: warmup uses a tiny 7-frame block, but the
-            #    first production block has different tensor shapes
-            #    (`arachne_block_num_frames`), which forces torch.compile /
-            #    dynamo to recompile its CUDA graphs. We saw the recompile
-            #    counter hit cache_size_limit (256) on warmup. Allow up to
-            #    120 s for the first block to land; subsequent blocks reuse
-            #    the compiled graphs and take ~3 s each.
+            #    Timeout budget: even with a matching warmup block size,
+            #    the first production block can take 2-5 minutes when
+            #    torch.compile / dynamo cascades through recompiles for
+            #    new prompt-conditioned graphs. Subsequent blocks reuse
+            #    the compiled graphs and take ~3 s each. Allow up to 360s.
             self._phase = "warming_up"
             self._pipeline.start()
-            await self._wait_first_frame(timeout=120.0)
+            await self._wait_first_frame(timeout=360.0)
 
             self._phase = "ready"
             self._ready_at = time.time()
