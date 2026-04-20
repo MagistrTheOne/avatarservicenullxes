@@ -65,7 +65,7 @@ class ArachneInitConfig(BaseModel):
         ),
     )
     resolution: Literal["480p", "720p"] = "480p"
-    num_frames: int = Field(default=93, ge=13, le=240)
+    num_frames: int = Field(default=25, ge=13, le=240)
     num_inference_steps: int = Field(default=8, ge=2, le=32)
     text_guidance_scale: float = Field(default=4.0, ge=0.0, le=10.0)
     audio_guidance_scale: float = Field(default=4.0, ge=0.0, le=10.0)
