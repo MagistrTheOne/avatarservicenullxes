@@ -35,7 +35,13 @@ class Settings(BaseSettings):
     # ARACHNE-X output is 16 FPS (see Demo/run_demo_streaming_realtime.py)
     # and uses "480p" (832x480) or "720p" (1280x720) resolution buckets.
     arachne_resolution: str = "480p"
-    arachne_block_num_frames: int = 93
+    # Production block size MUST match `arachne_warmup_frames` so the first
+    # live block reuses the CUDA graphs / dynamo specialisations created
+    # during warmup. Mismatched shapes trigger a long recompile cascade
+    # (`[41/N] q0 is not in var_ranges`) that can take 5+ minutes on the
+    # first block.  At 16 FPS, 25 frames = 1.56 s of audio per block,
+    # rendered in ~700 ms by H200 — comfortably real-time.
+    arachne_block_num_frames: int = 25
     arachne_num_inference_steps: int = 8
     arachne_text_guidance_scale: float = 4.0
     arachne_audio_guidance_scale: float = 4.0

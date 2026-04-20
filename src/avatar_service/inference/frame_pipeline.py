@@ -45,7 +45,7 @@ class FramePipeline:
         identity_tokens: IdentityTokens,
         prompt: str,
         resolution: str = "480p",
-        num_frames_per_block: int = 93,
+        num_frames_per_block: int = 25,
         num_inference_steps: int = 8,
         text_guidance_scale: float = 4.0,
         audio_guidance_scale: float = 4.0,
