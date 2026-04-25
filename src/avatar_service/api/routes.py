@@ -99,7 +99,7 @@ def create_api_router(
     ) -> CreateSessionResponse:
         session = await manager.create(body)
         return CreateSessionResponse(
-            provider="runpod" if settings.arachne_mode == "real" else "local",
+            provider="local" if settings.arachne_mode == "stub" else "runpod",
             session_id=session.request.session_id,
             status="ready" if session.phase == "ready" else "starting",
             agent_user_id=session.request.sfu.agent_user_id,

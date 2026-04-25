@@ -13,7 +13,7 @@ from typing import Literal
 from pydantic import Field, HttpUrl, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-ArachneMode = Literal["real", "stub"]
+ArachneMode = Literal["real", "stub", "infinitetalk"]
 LogFormat = Literal["pretty", "json"]
 LogLevel = Literal["debug", "info", "warning", "error", "critical"]
 
@@ -47,6 +47,24 @@ class Settings(BaseSettings):
     arachne_audio_guidance_scale: float = 4.0
     arachne_warmup_blocks: int = 1
     arachne_warmup_frames: int = 25
+
+    # --- InfiniteTalk runtime --------------------------------------------------
+    # Used when ARACHNE_MODE=infinitetalk. This runs a block inference by
+    # shelling out to InfiniteTalk's generate_infinitetalk.py script.
+    infinitetalk_repo_dir: str = "./third_party/InfiniteTalk"
+    infinitetalk_python_bin: str = "python"
+    infinitetalk_ckpt_dir: str = "./weights/Wan2.1-I2V-14B-480P"
+    infinitetalk_wav2vec_dir: str = "./weights/chinese-wav2vec2-base"
+    infinitetalk_model_dir: str = "./weights/InfiniteTalk/single/infinitetalk.safetensors"
+    infinitetalk_quant_dir: str = ""
+    infinitetalk_size: str = "infinitetalk-480"
+    infinitetalk_sample_steps: int = 8
+    infinitetalk_frame_num: int = 25
+    infinitetalk_motion_frame: int = 9
+    infinitetalk_audio_guidance_scale: float = 4.0
+    infinitetalk_text_guidance_scale: float = 4.0
+    infinitetalk_mode: Literal["clip", "streaming"] = "clip"
+    infinitetalk_temp_dir: str = "./tmp/infinitetalk"
 
     # --- OpenAI Realtime ------------------------------------------------------
     openai_api_key: str = ""
