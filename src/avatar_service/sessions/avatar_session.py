@@ -52,6 +52,16 @@ _log = get_logger(__name__)
 RING_SAMPLE_RATE = 16_000
 
 
+def _pcm16_rms(samples) -> float:
+    """RMS in [0..1] for int16 mono samples."""
+    import numpy as np
+
+    if samples is None or samples.size == 0:
+        return 0.0
+    x = samples.astype(np.float32) / 32768.0
+    return float(np.sqrt(np.mean(x * x)))
+
+
 @dataclass
 class _Metrics:
     frames_published: int = 0
@@ -85,6 +95,15 @@ class AvatarSession:
         # Rings: both at 16 kHz mono.
         self._mic_ring = AudioRing(sample_rate=RING_SAMPLE_RATE, capacity_seconds=1.0)
         self._tts_ring = AudioRing(sample_rate=RING_SAMPLE_RATE, capacity_seconds=2.0)
+        self._mic_probe = self._mic_ring.new_reader(start_at_latest=True)
+        self._tts_probe = self._tts_ring.new_reader(start_at_latest=True)
+
+        self._active_speaker: str = "assistant"
+        self._last_speaker_change_at = time.monotonic()
+        self._last_mic_activity_at: float | None = None
+        self._speaker_task: asyncio.Task[None] | None = None
+        self._degradation_level: str = "none"
+        self._last_degradation_emit_at: float = 0.0
 
         self._video_track: AvatarVideoTrack | None = None
         self._openai_peer: OpenAIRealtimePeer | None = None
@@ -123,6 +142,15 @@ class AvatarSession:
             ),
             audio_underruns=(self._pipeline.audio_underruns if self._pipeline else 0),
         )
+
+    def active_speaker(self) -> str:
+        return self._active_speaker
+
+    def _current_video_audio_source(self) -> str:
+        src = self._request.video_audio_source
+        if src in ("tts", "mic"):
+            return src
+        return "mic" if self._active_speaker == "candidate" else "tts"
 
     # ----------------------------------------------------------- lifecycle
     async def start(self) -> None:
@@ -187,6 +215,8 @@ class AvatarSession:
                 runtime=self._runtime,
                 tts_audio_ring=self._tts_ring,
                 video_track=self._video_track,
+                mic_audio_ring=self._mic_ring,
+                audio_source_getter=self._current_video_audio_source,
                 identity_tokens=self._identity,
                 prompt=arachne_cfg.prompt,
                 resolution=resolution,
@@ -247,6 +277,8 @@ class AvatarSession:
             #    the compiled graphs and take ~3 s each. Allow up to 360s.
             self._phase = "warming_up"
             self._pipeline.start()
+            if self._request.duplex_mode == "duplex" or self._request.video_audio_source == "auto":
+                self._speaker_task = asyncio.create_task(self._run_speaker_loop(), name="speaker-loop")
             await self._wait_first_frame(timeout=360.0)
 
             self._phase = "ready"
@@ -280,6 +312,13 @@ class AvatarSession:
             return
         self._phase = "stopping"
         # Shut down in reverse dependency order.
+        if self._speaker_task is not None:
+            self._speaker_task.cancel()
+            try:
+                await self._speaker_task
+            except Exception:
+                pass
+            self._speaker_task = None
         if self._pipeline is not None:
             await self._pipeline.stop()
         if self._sfu_peer is not None:
@@ -298,8 +337,79 @@ class AvatarSession:
             "stopped",
             session_id=self._request.session_id,
             meeting_id=self._request.meeting_id,
-            data={"reason": "requested"},
+            data={"reason": "requested", "agent_user_id": self._request.sfu.agent_user_id},
         )
+
+    async def _run_speaker_loop(self) -> None:
+        """Best-effort speaker state machine for duplex routing.
+
+        - assistant activity ≈ tts_ring has non-trivial RMS
+        - candidate activity ≈ mic_ring RMS crosses threshold
+        """
+        hold_s = max(0.0, float(self._request.speaker_hold_ms) / 1000.0)
+        silence_s = max(0.0, float(self._request.mic_vad_silence_ms) / 1000.0)
+        rms_th = float(self._request.mic_vad_rms_threshold)
+
+        tick = 0.05
+        probe_samples = int(RING_SAMPLE_RATE * tick)
+        while True:
+            await asyncio.sleep(tick)
+            now = time.monotonic()
+
+            mic_chunk = self._mic_probe.try_read(probe_samples)
+            if mic_chunk is not None and _pcm16_rms(mic_chunk) >= rms_th:
+                self._last_mic_activity_at = now
+
+            tts_chunk = self._tts_probe.try_read(probe_samples)
+            assistant_active = bool(tts_chunk is not None and _pcm16_rms(tts_chunk) > 0.005)
+            candidate_active = bool(
+                self._last_mic_activity_at is not None and (now - self._last_mic_activity_at) <= silence_s
+            )
+
+            desired = self._active_speaker
+            if self._request.duplex_mode == "duplex" or self._request.video_audio_source == "auto":
+                if candidate_active and not assistant_active:
+                    desired = "candidate"
+                elif assistant_active:
+                    desired = "assistant"
+
+            if desired != self._active_speaker and (now - self._last_speaker_change_at) >= hold_s:
+                self._active_speaker = desired
+                self._last_speaker_change_at = now
+                self._gateway.emit(
+                    "speaker_changed",
+                    session_id=self._request.session_id,
+                    meeting_id=self._request.meeting_id,
+                    data={
+                        "agent_user_id": self._request.sfu.agent_user_id,
+                        "active_speaker": self._active_speaker,
+                        "video_audio_source": self._current_video_audio_source(),
+                    },
+                )
+
+            # Degradation signals (best-effort, for gateway/UI visibility).
+            if self._pipeline is not None:
+                p95 = self._pipeline.latency_ewma.p95()
+                underruns = self._pipeline.audio_underruns
+                next_level = "none"
+                if underruns >= 3 or (p95 is not None and p95 > 120.0):
+                    next_level = "soft"
+                if underruns >= 10 or (p95 is not None and p95 > 250.0):
+                    next_level = "hard"
+                if next_level != self._degradation_level and (now - self._last_degradation_emit_at) >= 1.0:
+                    self._degradation_level = next_level
+                    self._last_degradation_emit_at = now
+                    self._gateway.emit(
+                        "engine_degraded",
+                        session_id=self._request.session_id,
+                        meeting_id=self._request.meeting_id,
+                        data={
+                            "agent_user_id": self._request.sfu.agent_user_id,
+                            "level": self._degradation_level,
+                            "p95_ms": p95,
+                            "audio_underruns": underruns,
+                        },
+                    )
 
     # ----------------------------------------------------------- helpers
     async def _wait_first_frame(self, timeout: float) -> None:

@@ -24,6 +24,7 @@ from __future__ import annotations
 import asyncio
 import math
 import time
+from collections.abc import Callable
 
 from ..encode.video_track import AvatarVideoTrack
 from ..logging import get_logger
@@ -42,6 +43,8 @@ class FramePipeline:
         tts_audio_ring: AudioRing,
         video_track: AvatarVideoTrack,
         *,
+        mic_audio_ring: AudioRing | None = None,
+        audio_source_getter: Callable[[], str] | None = None,
         identity_tokens: IdentityTokens,
         prompt: str,
         resolution: str = "480p",
@@ -58,8 +61,11 @@ class FramePipeline:
                 f"runtime.audio_sample_rate ({runtime.audio_sample_rate})"
             )
         self._runtime = runtime
-        self._ring = tts_audio_ring
-        self._cursor = tts_audio_ring.new_reader(start_at_latest=True)
+        self._tts_ring = tts_audio_ring
+        self._mic_ring = mic_audio_ring
+        self._audio_source_getter = audio_source_getter
+        self._tts_cursor = tts_audio_ring.new_reader(start_at_latest=True)
+        self._mic_cursor = mic_audio_ring.new_reader(start_at_latest=True) if mic_audio_ring else None
         self._video_track = video_track
         self._identity = identity_tokens
         self._prompt = prompt
@@ -80,6 +86,14 @@ class FramePipeline:
         self.blocks_generated = 0
         self.audio_underruns = 0
         self.first_frame_at: float | None = None
+
+    def _pick_cursor(self) -> AudioRing.Cursor:
+        if not self._audio_source_getter:
+            return self._tts_cursor
+        source = str(self._audio_source_getter())
+        if source == "mic" and self._mic_cursor is not None:
+            return self._mic_cursor
+        return self._tts_cursor
 
     # ---------- lifecycle ----------
     def start(self) -> None:
@@ -124,7 +138,8 @@ class FramePipeline:
             # we synthesize silence so the avatar falls into idle rendering.
             timeout = max(3.0, 3.0 * (self._num_frames / fps))
             read_t0 = time.perf_counter()
-            pcm = await self._cursor.read_exactly(block_samples, timeout=timeout)
+            cursor = self._pick_cursor()
+            pcm = await cursor.read_exactly(block_samples, timeout=timeout)
             read_ms = round((time.perf_counter() - read_t0) * 1000.0, 1)
             if pcm is None:
                 if self._cancelled:

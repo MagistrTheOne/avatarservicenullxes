@@ -15,6 +15,9 @@ from pydantic import BaseModel, Field
 
 Transport = Literal["webrtc-sfu", "hls"]
 
+DuplexMode = Literal["single_assistant", "duplex"]
+VideoAudioSource = Literal["tts", "mic", "auto"]
+
 
 class OpenAIInitConfig(BaseModel):
     """Minimal subset of the OpenAI Realtime session payload.
@@ -99,6 +102,32 @@ class CreateSessionRequest(BaseModel):
     openai: OpenAIInitConfig
     sfu: SfuJoinConfig
     arachne: ArachneInitConfig = Field(default_factory=ArachneInitConfig)
+    duplex_mode: DuplexMode = Field(
+        default="single_assistant",
+        description="Whether the avatar can switch to candidate-driven speaking (duplex routing).",
+    )
+    video_audio_source: VideoAudioSource = Field(
+        default="tts",
+        description="Audio source driving the avatar video inference: tts (assistant), mic (candidate), or auto.",
+    )
+    speaker_hold_ms: int = Field(
+        default=600,
+        ge=0,
+        le=10_000,
+        description="Minimum time to hold active speaker before switching (hysteresis).",
+    )
+    mic_vad_rms_threshold: float = Field(
+        default=0.02,
+        ge=0.0,
+        le=1.0,
+        description="Simple RMS threshold for mic_ring activity when video_audio_source=auto.",
+    )
+    mic_vad_silence_ms: int = Field(
+        default=450,
+        ge=0,
+        le=10_000,
+        description="Silence duration after which mic is considered inactive (auto routing).",
+    )
     reference_image: ReferenceImage | None = Field(
         default=None,
         description=(
@@ -157,6 +186,8 @@ class SessionSnapshot(BaseModel):
 
 EventType = Literal[
     "avatar_ready",
+    "speaker_changed",
+    "engine_degraded",
     "transcript_delta",
     "transcript_completed",
     "response_done",
